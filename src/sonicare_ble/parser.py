@@ -122,22 +122,20 @@ BYTES_TO_MODEL = {
 class SonicareBluetoothDeviceData(BluetoothData):
     """Data for Sonicare BLE sensors."""
 
-    def __init__(
-        self,
-        device: BLEDevice
-    ) -> None:
+    def __init__(self) -> None:
         # If this is True, we are currently brushing or were brushing as of the last advertisement data
         self._brushing = False
         self._last_brush = 0.0
         self._model = None
         self._run_mode_on = False
-        self._device = device
-        super().__init__(device)
+        self._device = None
+        super().__init__()
 
     def _start_update(self, service_info: BluetoothServiceInfo) -> None:
         """Update from BLE advertisement data."""
         _LOGGER.debug("Parsing Sonicare BLE advertisement data: %s", service_info)
         manufacturer_data = service_info.manufacturer_data
+        service_info.from_advertisement()
         service_uuids = service_info.service_uuids
         address = service_info.address
 
@@ -340,6 +338,9 @@ class SonicareBluetoothDeviceData(BluetoothData):
         value = int.from_bytes(data, "little")
         if _sender == CHARACTERISTIC_STATE:
             sensor = SonicareSensor.TOOTHBRUSH_STATE
+            if value == 2:
+                self._brushing = False
+                self._last_brush = time.monotonic()
         elif _sender == CHARACTERISTIC_BRUSHING_TIME:
             sensor = SonicareSensor.BRUSHING_TIME
         elif _sender == CHARACTERISTIC_MODE:
