@@ -29,33 +29,32 @@ from .const import (
     CHARACTERISTIC_STRENGTH,
     CHARACTERISTIC_MODE,
     SONICARE_ADVERTISMENT_UUID
-#    CHARACTERISTIC_BRUSH_TYPE
+    #    CHARACTERISTIC_BRUSH_TYPE
 )
 
 _LOGGER = logging.getLogger(__name__)
 
 
 class SonicareSensor(StrEnum):
-
     BRUSHING_TIME = "brushing_time"
     CURRENT_TIME = "current_time"
     TOOTHBRUSH_STATE = "toothbrush_state"
     MODE = "mode"
     SIGNAL_STRENGTH = "signal_strength"
     BATTERY_PERCENT = "battery_percent"
-#    BRUSH_TYPE = "brush_type"
+    #    BRUSH_TYPE = "brush_type"
     BRUSH_STRENGTH = "brush_strength"
     BRUSH_HEAD_LIFETIME = "brush_head_lifetime"
     BRUSH_HEAD_USAGE = "brush_head_usage"
     BRUSH_SERIAL_NUMBER = "brush_serial_number"
     BRUSH_LIFETIME_PERCENTAGE = "brush_head_percentage"
 
+
 class SonicareBinarySensor(StrEnum):
     BRUSHING = "brushing"
 
 
 class Models(Enum):
-
     HX6340 = auto()
     HX992X = auto()
     HX9990 = auto()
@@ -63,7 +62,6 @@ class Models(Enum):
 
 @dataclass
 class ModelDescription:
-
     device_type: str
     modes: dict[int, str]
 
@@ -120,16 +118,21 @@ BYTES_TO_MODEL = {
     b"\x9999": Models.HX9990,
 }
 
+
 class SonicareBluetoothDeviceData(BluetoothData):
     """Data for Sonicare BLE sensors."""
 
-    def __init__(self) -> None:
-        super().__init__()
+    def __init__(
+        self,
+        device: BLEDevice
+    ) -> None:
         # If this is True, we are currently brushing or were brushing as of the last advertisement data
         self._brushing = False
         self._last_brush = 0.0
         self._model = None
-        self.client: BleakClientWithServiceCache | None = None
+        self._run_mode_on = False
+        self._device = device
+        super().__init__(device)
 
     def _start_update(self, service_info: BluetoothServiceInfo) -> None:
         """Update from BLE advertisement data."""
@@ -138,22 +141,12 @@ class SonicareBluetoothDeviceData(BluetoothData):
         service_uuids = service_info.service_uuids
         address = service_info.address
 
-        if(
+        if (
             SONICARE_ADVERTISMENT_UUID not in service_uuids
         ):
             _LOGGER.debug("Not a Philips Sonicare BLE advertisement for address: %s", address)
             return
-        # correct_device = False
-        # for service_uuid in service_uuids:
-        #     _LOGGER.debug(
-        #         "Parsing Sonicare BLE uuid: %s",
-        #         service_uuid,
-        #     )
-        #     if SONICARE_ADVERTISMENT_UUID in service_uuid:
-        #         correct_device = True
-        #
-        # if not correct_device:
-        #     return None
+
         self.set_device_manufacturer("Philips Sonicare")
         # model = BYTES_TO_MODEL.get(device_bytes, Models.HX6340)
         model = Models.HX992X
@@ -192,16 +185,17 @@ class SonicareBluetoothDeviceData(BluetoothData):
             BleakClientWithServiceCache, ble_device, ble_device.address
         )
 
+
         try:
             state_char = client.services.get_characteristic(CHARACTERISTIC_STATE)
             state_payload = await client.read_gatt_char(state_char)
             tb_state = STATES.get(state_payload[0], f"unknown state {state_payload[0]}")
             _LOGGER.debug("brushing state is changing to %s the payload is %s", tb_state, state_payload[0])
 
-            if tb_state == "run" or state_payload[0] == 2:
+            if tb_state == "run" or int.from_bytes(state_payload[0], "little") == 2:
                 self._brushing = True
                 self._last_brush = time.monotonic()
-                _LOGGER.debug("setting update to frequent")
+                _LOGGER.debug("Toothbrush is running, subscribing to events")
                 await client.start_notify(CHARACTERISTIC_STATE, self._notification_handler)
                 await client.start_notify(CHARACTERISTIC_BRUSHING_TIME, self._notification_handler)
                 await client.start_notify(CHARACTERISTIC_MODE, self._notification_handler)
@@ -209,6 +203,7 @@ class SonicareBluetoothDeviceData(BluetoothData):
                 self._brushing = False
                 await client.stop_notify(CHARACTERISTIC_STATE, self._notification_handler)
                 await client.stop_notify(CHARACTERISTIC_BRUSHING_TIME, self._notification_handler)
+                await client.start_notify(CHARACTERISTIC_MODE, self._notification_handler)
                 _LOGGER.debug("not updating frequently")
 
             brush_usage_char = client.services.get_characteristic(CHARACTERISTIC_BRUSH_USAGE)
@@ -236,7 +231,8 @@ class SonicareBluetoothDeviceData(BluetoothData):
 
             strength_char = client.services.get_characteristic(CHARACTERISTIC_STRENGTH)
             strength_payload = await client.read_gatt_char(strength_char)
-            strength_result = STRENGTH.get(int.from_bytes(strength_payload, "little"), f"unknown speed {strength_payload}")
+            strength_result = STRENGTH.get(int.from_bytes(strength_payload, "little"),
+                                           f"unknown speed {strength_payload}")
 
             battery_char = client.services.get_characteristic(CHARACTERISTIC_BATTERY)
             battery_payload = await client.read_gatt_char(battery_char)
@@ -342,4 +338,17 @@ class SonicareBluetoothDeviceData(BluetoothData):
     def _notification_handler(self, _sender: int, data: bytearray) -> None:
         """Start notification"""
         value = int.from_bytes(data, "little")
+        if _sender == CHARACTERISTIC_STATE:
+            sensor = SonicareSensor.TOOTHBRUSH_STATE
+        elif _sender == CHARACTERISTIC_BRUSHING_TIME:
+            sensor = SonicareSensor.BRUSHING_TIME
+        elif _sender == CHARACTERISTIC_MODE:
+            sensor = SonicareSensor.MODE
+
+        self.update_sensor(
+            str(sensor),
+            None,
+            value,
+            None
+        )
         _LOGGER.error(f"Subscribed to uuid: {_sender}, received value of {value}")
