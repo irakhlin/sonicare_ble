@@ -204,6 +204,7 @@ class SonicareBluetoothDeviceData(BluetoothData):
                 _LOGGER.debug("setting update to frequent")
                 await client.start_notify(CHARACTERISTIC_STATE, self._notification_handler)
                 await client.start_notify(CHARACTERISTIC_BRUSHING_TIME, self._notification_handler)
+                await client.start_notify(CHARACTERISTIC_MODE, self._notification_handler)
             else:
                 self._brushing = False
                 await client.stop_notify(CHARACTERISTIC_STATE, self._notification_handler)
@@ -340,4 +341,5 @@ class SonicareBluetoothDeviceData(BluetoothData):
 
     def _notification_handler(self, _sender: int, data: bytearray) -> None:
         """Start notification"""
-        _LOGGER.error("%s: Subscribe to notifications; %s : %s", _sender, data)
+        value = int.from_bytes(data, "little")
+        _LOGGER.error(f"Subscribed to uuid: {_sender}, received value of {value}")
