@@ -129,6 +129,7 @@ class SonicareBluetoothDeviceData(BluetoothData):
         self._brushing = False
         self._last_brush = 0.0
         self._model = None
+        self.client: BleakClientWithServiceCache | None = None
 
     def _start_update(self, service_info: BluetoothServiceInfo) -> None:
         """Update from BLE advertisement data."""
@@ -190,7 +191,25 @@ class SonicareBluetoothDeviceData(BluetoothData):
         client = await establish_connection(
             BleakClientWithServiceCache, ble_device, ble_device.address
         )
+
         try:
+            state_char = client.services.get_characteristic(CHARACTERISTIC_STATE)
+            state_payload = await client.read_gatt_char(state_char)
+            tb_state = STATES.get(state_payload[0], f"unknown state {state_payload[0]}")
+            _LOGGER.debug("brushing state is changing to %s the payload is %s", tb_state, state_payload[0])
+
+            if tb_state == "run" or state_payload[0] == 2:
+                self._brushing = True
+                self._last_brush = time.monotonic()
+                _LOGGER.debug("setting update to frequent")
+                await client.start_notify(CHARACTERISTIC_STATE, self._notification_handler)
+                await client.start_notify(CHARACTERISTIC_BRUSHING_TIME, self._notification_handler)
+            else:
+                self._brushing = False
+                await client.stop_notify(CHARACTERISTIC_STATE, self._notification_handler)
+                await client.stop_notify(CHARACTERISTIC_BRUSHING_TIME, self._notification_handler)
+                _LOGGER.debug("not updating frequently")
+
             brush_usage_char = client.services.get_characteristic(CHARACTERISTIC_BRUSH_USAGE)
             brush_usage_payload = await client.read_gatt_char(brush_usage_char)
             usage = int.from_bytes(brush_usage_payload, "little")
@@ -225,19 +244,6 @@ class SonicareBluetoothDeviceData(BluetoothData):
                 CHARACTERISTIC_BRUSHING_TIME
             )
             brushing_time_payload = await client.read_gatt_char(brushing_time_char)
-
-            state_char = client.services.get_characteristic(CHARACTERISTIC_STATE)
-            state_payload = await client.read_gatt_char(state_char)
-            tb_state = STATES.get(state_payload[0], f"unknown state {state_payload[0]}")
-            _LOGGER.debug("brushing state is changing to %s the payload is %s", tb_state, state_payload[0])
-
-            if tb_state == "run" or state_payload[0] == 2:
-                self._brushing = True
-                self._last_brush = time.monotonic()
-                _LOGGER.debug("setting update to frequent")
-            else:
-                self._brushing = False
-                _LOGGER.debug("not updating frequently")
 
             current_time_char = client.services.get_characteristic(
                 CHARACTERISTIC_CURRENT_TIME
@@ -331,3 +337,7 @@ class SonicareBluetoothDeviceData(BluetoothData):
             "Brush head remaining"
         )
         return self._finish_update()
+
+    def _notification_handler(self, _sender: int, data: bytearray) -> None:
+        """Start notification"""
+        _LOGGER.error("%s: Subscribe to notifications; %s : %s", _sender, data)
