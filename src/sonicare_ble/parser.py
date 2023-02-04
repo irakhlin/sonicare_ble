@@ -28,8 +28,8 @@ from .const import (
     CHARACTERISTIC_SERIAL_NUMBER,
     CHARACTERISTIC_STRENGTH,
     CHARACTERISTIC_MODE,
-    SONICARE_ADVERTISMENT_UUID,
-    CHARACTERISTIC_BRUSH_TYPE
+    SONICARE_ADVERTISMENT_UUID
+#    CHARACTERISTIC_BRUSH_TYPE
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -43,11 +43,10 @@ class SonicareSensor(StrEnum):
     MODE = "mode"
     SIGNAL_STRENGTH = "signal_strength"
     BATTERY_PERCENT = "battery_percent"
-    BRUSH_TYPE = "brush_type"
+#    BRUSH_TYPE = "brush_type"
     BRUSH_STRENGTH = "brush_strength"
     BRUSH_HEAD_LIFETIME = "brush_head_lifetime"
     BRUSH_HEAD_USAGE = "brush_head_usage"
-    BRUSH_HEAD_PERCENTAGE = "brush_head_percentage"
     BRUSH_SERIAL_NUMBER = "brush_serial_number"
     BRUSH_LIFETIME_PERCENTAGE = "brush_head_percentage"
 
@@ -133,7 +132,7 @@ class SonicareBluetoothDeviceData(BluetoothData):
 
     def _start_update(self, service_info: BluetoothServiceInfo) -> None:
         """Update from BLE advertisement data."""
-        _LOGGER.error("Parsing Sonicare BLE advertisement data: %s", service_info)
+        _LOGGER.debug("Parsing Sonicare BLE advertisement data: %s", service_info)
         manufacturer_data = service_info.manufacturer_data
         service_uuids = service_info.service_uuids
         address = service_info.address
@@ -141,7 +140,7 @@ class SonicareBluetoothDeviceData(BluetoothData):
         if(
             SONICARE_ADVERTISMENT_UUID not in service_uuids
         ):
-            _LOGGER.error("Not a Philips Sonicare BLE advertisement for address: %s", address)
+            _LOGGER.debug("Not a Philips Sonicare BLE advertisement for address: %s", address)
             return
         # correct_device = False
         # for service_uuid in service_uuids:
@@ -171,7 +170,7 @@ class SonicareBluetoothDeviceData(BluetoothData):
         This is called every time we get a service_info for a device. It means the
         device is working and online.
         """
-        _LOGGER.error("poll_needed called")
+        _LOGGER.debug("poll_needed called")
         if last_poll is None:
             return True
         update_interval = NOT_BRUSHING_UPDATE_INTERVAL_SECONDS
@@ -180,14 +179,14 @@ class SonicareBluetoothDeviceData(BluetoothData):
             or time.monotonic() - self._last_brush <= TIMEOUT_RECENTLY_BRUSHING
         ):
             update_interval = BRUSHING_UPDATE_INTERVAL_SECONDS
-        _LOGGER.error("poll_needed returning update_interval of %s", update_interval)
+        _LOGGER.debug("poll_needed returning update_interval of %s", update_interval)
         return last_poll > update_interval
 
     async def async_poll(self, ble_device: BLEDevice) -> SensorUpdate:
         """
         Poll the device to retrieve any values we can't get from passive listening.
         """
-        _LOGGER.error("async_poll")
+        _LOGGER.debug("async_poll")
         client = await establish_connection(
             BleakClientWithServiceCache, ble_device, ble_device.address
         )
@@ -230,13 +229,15 @@ class SonicareBluetoothDeviceData(BluetoothData):
             state_char = client.services.get_characteristic(CHARACTERISTIC_STATE)
             state_payload = await client.read_gatt_char(state_char)
             tb_state = STATES.get(state_payload[0], f"unknown state {state_payload[0]}")
-            _LOGGER.error("brushing state is changing to %s", tb_state)
+            _LOGGER.debug("brushing state is changing to %s the payload is %s", tb_state, state_payload[0])
 
             if tb_state == "run" or state_payload[0] == 2:
                 self._brushing = True
                 self._last_brush = time.monotonic()
+                _LOGGER.debug("setting update to frequent")
             else:
                 self._brushing = False
+                _LOGGER.debug("not updating frequently")
 
             current_time_char = client.services.get_characteristic(
                 CHARACTERISTIC_CURRENT_TIME
@@ -249,9 +250,6 @@ class SonicareBluetoothDeviceData(BluetoothData):
             serial_number_payload = await client.read_gatt_char(brush_serial_number_char)
             serial_number = int.from_bytes(serial_number_payload, "little")
 
-            brush_type_char = client.services.get_characteristic(CHARACTERISTIC_BRUSH_TYPE)
-            brush_type_payload = await client.read_gatt_char(brush_type_char)
-            brush_type = int.from_bytes(brush_type_payload, "little")
         finally:
             await client.disconnect()
         self.update_sensor(
@@ -315,14 +313,6 @@ class SonicareBluetoothDeviceData(BluetoothData):
             strength_result,
             None,
             "Toothbrush current strength"
-        )
-
-        self.update_sensor(
-            str(SonicareSensor.BRUSH_TYPE),
-            None,
-            brush_type,
-            None,
-            "Toothbrush head type"
         )
 
         self.update_sensor(
