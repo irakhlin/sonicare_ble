@@ -28,8 +28,8 @@ from .const import (
     CHARACTERISTIC_SERIAL_NUMBER,
     CHARACTERISTIC_STRENGTH,
     CHARACTERISTIC_MODE,
-    SONICARE_ADVERTISMENT_UUID
-    #    CHARACTERISTIC_BRUSH_TYPE
+    SONICARE_ADVERTISMENT_UUID,
+    CHAR_DICT
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -42,12 +42,12 @@ class SonicareSensor(StrEnum):
     MODE = "mode"
     SIGNAL_STRENGTH = "signal_strength"
     BATTERY_PERCENT = "battery_percent"
-    #    BRUSH_TYPE = "brush_type"
     BRUSH_STRENGTH = "brush_strength"
     BRUSH_HEAD_LIFETIME = "brush_head_lifetime"
     BRUSH_HEAD_USAGE = "brush_head_usage"
     BRUSH_SERIAL_NUMBER = "brush_serial_number"
     BRUSH_LIFETIME_PERCENTAGE = "brush_head_percentage"
+    BRUSH_SESSION_ID = "current_session_id"
 
 
 class SonicareBinarySensor(StrEnum):
@@ -127,14 +127,14 @@ class SonicareBluetoothDeviceData(BluetoothData):
         self._brushing = False
         self._last_brush = 0.0
         self._model = None
-        self._run_mode_on = False
         self._device = None
+        self._client = None
+        self._session = None
         super().__init__()
 
     def _start_update(self, service_info: BluetoothServiceInfo) -> None:
         """Update from BLE advertisement data."""
         _LOGGER.debug("Parsing Sonicare BLE advertisement data: %s", service_info)
-        manufacturer_data = service_info.manufacturer_data
         service_uuids = service_info.service_uuids
         address = service_info.address
 
@@ -143,6 +143,7 @@ class SonicareBluetoothDeviceData(BluetoothData):
         ):
             _LOGGER.debug("Not a Philips Sonicare BLE advertisement for address: %s", address)
             return
+
 
         self.set_device_manufacturer("Philips Sonicare")
         # model = BYTES_TO_MODEL.get(device_bytes, Models.HX6340)
@@ -181,63 +182,15 @@ class SonicareBluetoothDeviceData(BluetoothData):
         client = await establish_connection(
             BleakClientWithServiceCache, ble_device, ble_device.address
         )
-
-
+        new_session = False
         try:
-            state_char = client.services.get_characteristic(CHARACTERISTIC_STATE)
+            state_char = client.services.get_characteristic(CHAR_DICT.get("STATE")[0])
             state_payload = await client.read_gatt_char(state_char)
             tb_state = STATES.get(state_payload[0], f"unknown state {state_payload[0]}")
             _LOGGER.debug("brushing state is changing to %s the payload is %s", tb_state, state_payload[0])
 
-            if tb_state == "run" or int.from_bytes(state_payload[0], "little") == 2:
-                self._brushing = True
-                self._last_brush = time.monotonic()
-                _LOGGER.debug("Toothbrush is running, subscribing to events")
-                await client.start_notify(CHARACTERISTIC_STATE, self._notification_handler)
-                await client.start_notify(CHARACTERISTIC_BRUSHING_TIME, self._notification_handler)
-                await client.start_notify(CHARACTERISTIC_MODE, self._notification_handler)
-            else:
-                self._brushing = False
-                await client.stop_notify(CHARACTERISTIC_STATE, self._notification_handler)
-                await client.stop_notify(CHARACTERISTIC_BRUSHING_TIME, self._notification_handler)
-                await client.start_notify(CHARACTERISTIC_MODE, self._notification_handler)
-                _LOGGER.debug("not updating frequently")
-
-            brush_usage_char = client.services.get_characteristic(CHARACTERISTIC_BRUSH_USAGE)
-            brush_usage_payload = await client.read_gatt_char(brush_usage_char)
-            usage = int.from_bytes(brush_usage_payload, "little")
-
-            brush_lifetime_char = client.services.get_characteristic(CHARACTERISTIC_BRUSH_LIFETIME)
-            brush_lifetime_payload = await client.read_gatt_char(brush_lifetime_char)
-
-            lifetime = int.from_bytes(brush_lifetime_payload, "little")
-
-            if lifetime != 0 and usage != 0:
-                brush_life_percentage_left = round(((lifetime - usage) / lifetime) * 100)
-            else:
-                brush_life_percentage_left = 0
-
-            mode_char = client.services.get_characteristic(CHARACTERISTIC_MODE)
-            mode_payload = await client.read_gatt_char(mode_char)
-            mode_int = int.from_bytes(mode_payload, "little")
-            if self._model:
-                info = DEVICE_TYPES[self._model]
-                mode = info.modes.get(mode_int, f"unknown mode {mode_int}")
-            else:
-                mode = "unknown mode"
-
-            strength_char = client.services.get_characteristic(CHARACTERISTIC_STRENGTH)
-            strength_payload = await client.read_gatt_char(strength_char)
-            strength_result = STRENGTH.get(int.from_bytes(strength_payload, "little"),
-                                           f"unknown speed {strength_payload}")
-
             battery_char = client.services.get_characteristic(CHARACTERISTIC_BATTERY)
             battery_payload = await client.read_gatt_char(battery_char)
-
-            brushing_time_char = client.services.get_characteristic(
-                CHARACTERISTIC_BRUSHING_TIME
-            )
-            brushing_time_payload = await client.read_gatt_char(brushing_time_char)
 
             current_time_char = client.services.get_characteristic(
                 CHARACTERISTIC_CURRENT_TIME
@@ -246,19 +199,74 @@ class SonicareBluetoothDeviceData(BluetoothData):
             current_time_epoch = int.from_bytes(current_time_payload, "little")
             current_time_stamp = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(current_time_epoch))
 
-            brush_serial_number_char = client.services.get_characteristic(CHARACTERISTIC_SERIAL_NUMBER)
-            serial_number_payload = await client.read_gatt_char(brush_serial_number_char)
-            serial_number = int.from_bytes(serial_number_payload, "little")
+            if tb_state == "run" or int.from_bytes(state_payload[0], "little") == 2:
+                self._brushing = True
+                self._last_brush = time.monotonic()
+                _LOGGER.debug("Toothbrush is running, subscribing to events")
+                await client.start_notify(CHAR_DICT.get("STATE")[0], self._notification_handler)
+                await client.start_notify(CHAR_DICT.get("BRUSHING_TIME")[0], self._notification_handler)
+                await client.start_notify(CHAR_DICT.get("MODE")[0], self._notification_handler)
+                await client.start_notify(CHAR_DICT.get("STRENGTH")[0], self._notification_handler)
+
+            else:
+                self._brushing = False
+                await client.stop_notify(CHAR_DICT.get("STATE")[0], self._notification_handler)
+                await client.stop_notify(CHAR_DICT.get("BRUSHING_TIME")[0], self._notification_handler)
+                await client.stop_notify(CHAR_DICT.get("MODE")[0], self._notification_handler)
+                await client.stop_notify(CHAR_DICT.get("STRENGTH")[0], self._notification_handler)
+                _LOGGER.debug("not updating frequently")
+
+            session_payload = await client.read_gatt_char(
+                client.services.get_characteristic(CHAR_DICT.get("SESSION_ID")[0])
+            )
+            session = int.from_bytes(session_payload, "little")
+
+            if self._session is None or self._session != session:
+                self._session = session
+                new_session = True
+                _LOGGER.debug(f"New brushing session: {session}")
+                brush_serial_number_char = client.services.get_characteristic(CHAR_DICT.get("BRUSH_SERIAL_NUMBER"))
+                serial_number_payload = await client.read_gatt_char(brush_serial_number_char)
+                serial_number = int.from_bytes(serial_number_payload, "little")
+
+                brush_usage_char = client.services.get_characteristic(CHAR_DICT.get("BRUSH_USAGE")[0])
+                brush_usage_payload = await client.read_gatt_char(brush_usage_char)
+                usage = int.from_bytes(brush_usage_payload, "little")
+
+                brush_lifetime_char = client.services.get_characteristic(CHARACTERISTIC_BRUSH_LIFETIME)
+                brush_lifetime_payload = await client.read_gatt_char(brush_lifetime_char)
+                lifetime = int.from_bytes(brush_lifetime_payload, "little")
+
+                if lifetime != 0 and usage != 0:
+                    brush_life_percentage_left = round(((lifetime - usage) / lifetime) * 100)
+                else:
+                    brush_life_percentage_left = 0
+
+            # mode_char = client.services.get_characteristic(CHARACTERISTIC_MODE)
+            # mode_payload = await client.read_gatt_char(mode_char)
+            # mode_int = int.from_bytes(mode_payload, "little")
+            # if self._model:
+            #     info = DEVICE_TYPES[self._model]
+            #     mode = info.modes.get(mode_int, f"unknown mode {mode_int}")
+            # else:
+            #     mode = "unknown mode"
+            #
+            # strength_char = client.services.get_characteristic(CHARACTERISTIC_STRENGTH)
+            # strength_payload = await client.read_gatt_char(strength_char)
+            # strength_result = STRENGTH.get(int.from_bytes(strength_payload, "little"),
+            #                                f"unknown speed {strength_payload}")
+            #
+            #
+            #
+            # brushing_time_char = client.services.get_characteristic(
+            #     CHARACTERISTIC_BRUSHING_TIME
+            # )
+            # brushing_time_payload = await client.read_gatt_char(brushing_time_char)
 
         finally:
-            await client.disconnect()
-        self.update_sensor(
-            str(SonicareSensor.BRUSHING_TIME),
-            None,
-            int.from_bytes(brushing_time_payload, "little"),
-            None,
-            "Brushing time",
-        )
+            if not self._brushing:
+                await client.disconnect()
+
         self.update_sensor(
             str(SonicareSensor.BATTERY_PERCENT),
             Units.PERCENTAGE,
@@ -283,73 +291,102 @@ class SonicareBluetoothDeviceData(BluetoothData):
             "Toothbrush current time",
         )
 
-        self.update_sensor(
-            str(SonicareSensor.BRUSH_HEAD_LIFETIME),
-            None,
-            lifetime,
-            None,
-            "Brush head lifetime"
-        )
+        if new_session:
+            self.update_sensor(
+                str(SonicareSensor.BRUSH_HEAD_LIFETIME),
+                None,
+                lifetime,
+                None,
+                "Brush head lifetime"
+            )
 
-        self.update_sensor(
-            str(SonicareSensor.BRUSH_HEAD_USAGE),
-            None,
-            usage,
-            None,
-            "Brush head usage"
-        )
+            self.update_sensor(
+                str(SonicareSensor.BRUSH_HEAD_USAGE),
+                None,
+                usage,
+                None,
+                "Brush head usage"
+            )
 
-        self.update_sensor(
-            str(SonicareSensor.MODE),
-            None,
-            mode,
-            None,
-            "Toothbrush current mode"
-        )
+            self.update_sensor(
+                str(SonicareSensor.BRUSH_SERIAL_NUMBER),
+                None,
+                serial_number,
+                None,
+                "Toothbrush serial number"
+            )
 
-        self.update_sensor(
-            str(SonicareSensor.BRUSH_STRENGTH),
-            None,
-            strength_result,
-            None,
-            "Toothbrush current strength"
-        )
+            self.update_sensor(
+                str(SonicareSensor.BRUSH_LIFETIME_PERCENTAGE),
+                None,
+                brush_life_percentage_left,
+                None,
+                "Brush head remaining"
+            )
 
-        self.update_sensor(
-            str(SonicareSensor.BRUSH_SERIAL_NUMBER),
-            None,
-            serial_number,
-            None,
-            "Toothbrush serial number"
-        )
+            self.update_sensor(
+                str(SonicareSensor.BRUSH_SESSION_ID),
+                None,
+                session,
+                None,
+                "Session ID"
+            )
+        # self.update_sensor(
+        #     str(SonicareSensor.BRUSHING_TIME),
+        #     None,
+        #     int.from_bytes(brushing_time_payload, "little"),
+        #     None,
+        #     "Brushing time",
+        # )
+        # self.update_sensor(
+        #     str(SonicareSensor.MODE),
+        #     None,
+        #     mode,
+        #     None,
+        #     "Toothbrush current mode"
+        # )
 
-        self.update_sensor(
-            str(SonicareSensor.BRUSH_LIFETIME_PERCENTAGE),
-            None,
-            brush_life_percentage_left,
-            None,
-            "Brush head remaining"
-        )
+        # self.update_sensor(
+        #     str(SonicareSensor.BRUSH_STRENGTH),
+        #     None,
+        #     strength_result,
+        #     None,
+        #     "Toothbrush current strength"
+        # )
         return self._finish_update()
 
     def _notification_handler(self, _sender: BleakGATTCharacteristic, data: bytearray) -> None:
         """Start notification"""
         value = int.from_bytes(data, "little")
         _LOGGER.error(f"notification handler executed for {_sender.uuid} with value of {value}")
-        if _sender.uuid == CHARACTERISTIC_STATE:
-            sensor = SonicareSensor.TOOTHBRUSH_STATE
-            if value == 2:
+        if _sender.uuid == CHAR_DICT.get("STATE")[0]:
+            sensor_value = STATES.get(data[0], f"unknown state {data[0]}")
+            sensor_id = CHAR_DICT.get("STATE")[1]
+            sensor_string = CHAR_DICT.get("STATE")[2]
+            if value != 2:
                 self._brushing = False
+            else:
                 self._last_brush = time.monotonic()
-        elif _sender.uuid == CHARACTERISTIC_BRUSHING_TIME:
-            sensor = SonicareSensor.BRUSHING_TIME
-        elif _sender.uuid == CHARACTERISTIC_MODE:
-            sensor = SonicareSensor.MODE
+                self._brushing = True
+        elif _sender.uuid == CHAR_DICT.get("BRUSHING_TIME")[0]:
+            sensor_value = int.from_bytes(value, "little")
+            sensor_id = CHAR_DICT.get("BRUSHING_TIME")[1]
+            sensor_string = CHAR_DICT.get("BRUSHING_TIME")[2]
+        elif _sender.uuid == CHAR_DICT.get("MODE")[0]:
+            sensor_value = DEVICE_TYPES[self._model].modes.get(value, f"unknown mode")
+            sensor_id = CHAR_DICT.get("MODE")[1]
+            sensor_string = CHAR_DICT.get("MODE")[2]
+        elif _sender.uuid == CHAR_DICT.get("STRENGTH")[0]:
+            sensor_value = STRENGTH.get(value, f"unknown speed")
+            sensor_id = CHAR_DICT.get("STRENGTH")[1]
+            sensor_string = CHAR_DICT.get("STRENGTH")[2]
         else:
             return
+
         self.update_sensor(
-            str(sensor),
+            sensor_id,
             None,
-            value,
-            None
+            sensor_value,
+            None,
+            sensor_string
         )
