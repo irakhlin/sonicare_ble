@@ -34,5 +34,5 @@ CHAR_DICT = {
     "BRUSH_USAGE": ("477ea600-a260-11e4-ae37-0002a5d54290", "brush_head_usage"),
     "BRUSH_HEAD_LIFETIME": ("477ea600-a260-11e4-ae37-0002a5d54280", "brush_head_lifetime"),
     "BRUSH_SERIAL_NUMBER": ("477ea600-a260-11e4-ae37-0002a5d54230", "brush_serial_number", "Toothbrush serial number"),
-    "SESSION_ID": ("477ea600-a260-11e4-ae37-0002a5d54230", "current_session_id")
+    "SESSION_ID": ("477ea600-a260-11e4-ae37-0002a5d54070", "current_session_id")
 }

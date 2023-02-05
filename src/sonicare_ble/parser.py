@@ -225,7 +225,7 @@ class SonicareBluetoothDeviceData(BluetoothData):
                 self._session = session
                 new_session = True
                 _LOGGER.debug(f"New brushing session: {session}")
-                brush_serial_number_char = client.services.get_characteristic(CHAR_DICT.get("BRUSH_SERIAL_NUMBER"))
+                brush_serial_number_char = client.services.get_characteristic(CHAR_DICT.get("BRUSH_SERIAL_NUMBER")[0])
                 serial_number_payload = await client.read_gatt_char(brush_serial_number_char)
                 serial_number = int.from_bytes(serial_number_payload, "little")
 
@@ -242,19 +242,19 @@ class SonicareBluetoothDeviceData(BluetoothData):
                 else:
                     brush_life_percentage_left = 0
 
-            # mode_char = client.services.get_characteristic(CHARACTERISTIC_MODE)
-            # mode_payload = await client.read_gatt_char(mode_char)
-            # mode_int = int.from_bytes(mode_payload, "little")
-            # if self._model:
-            #     info = DEVICE_TYPES[self._model]
-            #     mode = info.modes.get(mode_int, f"unknown mode {mode_int}")
-            # else:
-            #     mode = "unknown mode"
-            #
-            # strength_char = client.services.get_characteristic(CHARACTERISTIC_STRENGTH)
-            # strength_payload = await client.read_gatt_char(strength_char)
-            # strength_result = STRENGTH.get(int.from_bytes(strength_payload, "little"),
-            #                                f"unknown speed {strength_payload}")
+                mode_char = client.services.get_characteristic(CHARACTERISTIC_MODE)
+                mode_payload = await client.read_gatt_char(mode_char)
+                mode_int = int.from_bytes(mode_payload, "little")
+                if self._model:
+                    info = DEVICE_TYPES[self._model]
+                    mode = info.modes.get(mode_int, f"unknown mode {mode_int}")
+                else:
+                    mode = "unknown mode"
+
+                strength_char = client.services.get_characteristic(CHARACTERISTIC_STRENGTH)
+                strength_payload = await client.read_gatt_char(strength_char)
+                strength_result = STRENGTH.get(int.from_bytes(strength_payload, "little"),
+                                               f"unknown speed {strength_payload}")
             #
             #
             #
@@ -338,21 +338,21 @@ class SonicareBluetoothDeviceData(BluetoothData):
         #     None,
         #     "Brushing time",
         # )
-        # self.update_sensor(
-        #     str(SonicareSensor.MODE),
-        #     None,
-        #     mode,
-        #     None,
-        #     "Toothbrush current mode"
-        # )
+            self.update_sensor(
+                str(SonicareSensor.MODE),
+                None,
+                mode,
+                None,
+                "Toothbrush current mode"
+            )
 
-        # self.update_sensor(
-        #     str(SonicareSensor.BRUSH_STRENGTH),
-        #     None,
-        #     strength_result,
-        #     None,
-        #     "Toothbrush current strength"
-        # )
+            self.update_sensor(
+                str(SonicareSensor.BRUSH_STRENGTH),
+                None,
+                strength_result,
+                None,
+                "Toothbrush current strength"
+            )
         return self._finish_update()
 
     def _notification_handler(self, _sender: BleakGATTCharacteristic, data: bytearray) -> None:
@@ -369,7 +369,7 @@ class SonicareBluetoothDeviceData(BluetoothData):
                 self._last_brush = time.monotonic()
                 self._brushing = True
         elif _sender.uuid == CHAR_DICT.get("BRUSHING_TIME")[0]:
-            sensor_value = int.from_bytes(value, "little")
+            sensor_value = value
             sensor_id = CHAR_DICT.get("BRUSHING_TIME")[1]
             sensor_string = CHAR_DICT.get("BRUSHING_TIME")[2]
         elif _sender.uuid == CHAR_DICT.get("MODE")[0]:
