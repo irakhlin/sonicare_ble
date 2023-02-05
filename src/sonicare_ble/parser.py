@@ -256,13 +256,13 @@ class SonicareBluetoothDeviceData(BluetoothData):
                 strength_payload = await client.read_gatt_char(strength_char)
                 strength_result = STRENGTH.get(int.from_bytes(strength_payload, "little"),
                                                f"unknown speed {strength_payload}")
-            #
-            #
-            #
-            # brushing_time_char = client.services.get_characteristic(
-            #     CHARACTERISTIC_BRUSHING_TIME
-            # )
-            # brushing_time_payload = await client.read_gatt_char(brushing_time_char)
+
+
+
+                brushing_time_char = client.services.get_characteristic(
+                    CHARACTERISTIC_BRUSHING_TIME
+                )
+                brushing_time_payload = await client.read_gatt_char(brushing_time_char)
 
         finally:
             if not self._brushing:
@@ -332,13 +332,13 @@ class SonicareBluetoothDeviceData(BluetoothData):
                 None,
                 "Session ID"
             )
-        # self.update_sensor(
-        #     str(SonicareSensor.BRUSHING_TIME),
-        #     None,
-        #     int.from_bytes(brushing_time_payload, "little"),
-        #     None,
-        #     "Brushing time",
-        # )
+            self.update_sensor(
+                str(SonicareSensor.BRUSHING_TIME),
+                None,
+                int.from_bytes(brushing_time_payload, "little"),
+                None,
+                "Brushing time",
+            )
             self.update_sensor(
                 str(SonicareSensor.MODE),
                 None,
