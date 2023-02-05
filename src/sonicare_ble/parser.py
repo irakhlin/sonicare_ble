@@ -1,6 +1,7 @@
 """Parser for Sonicare BLE advertisements."""
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 
@@ -130,6 +131,7 @@ class SonicareBluetoothDeviceData(BluetoothData):
         self._device = None
         self._client = None
         self._session = None
+        self._notify_future: asyncio.Future[bytearray] | None = None
         super().__init__()
 
     def _start_update(self, service_info: BluetoothServiceInfo) -> None:
@@ -137,7 +139,6 @@ class SonicareBluetoothDeviceData(BluetoothData):
         _LOGGER.debug("Parsing Sonicare BLE advertisement data: %s", service_info)
         service_uuids = service_info.service_uuids
         address = service_info.address
-
         if (
             SONICARE_ADVERTISMENT_UUID not in service_uuids
         ):
@@ -357,31 +358,42 @@ class SonicareBluetoothDeviceData(BluetoothData):
 
     def _notification_handler(self, _sender: BleakGATTCharacteristic, data: bytearray) -> None:
         """Start notification"""
-        value = int.from_bytes(data, "little")
-        _LOGGER.error(f"notification handler executed for {_sender.uuid} with value of {value}")
+        _LOGGER.error(f"notification handler executed for {_sender.uuid} with value of {data}")
         if _sender.uuid == CHAR_DICT.get("STATE")[0]:
             sensor_value = STATES.get(data[0], f"unknown state {data[0]}")
             sensor_id = CHAR_DICT.get("STATE")[1]
             sensor_string = CHAR_DICT.get("STATE")[2]
-            if value != 2:
+            if sensor_value != 2:
                 self._brushing = False
+                _LOGGER.error("brushing ended")
             else:
                 self._last_brush = time.monotonic()
                 self._brushing = True
+                _LOGGER.error("brushing started")
+            self.update_sensor(
+                str(SonicareSensor.TOOTHBRUSH_STATE),
+                None,
+                sensor_value,
+                None,
+                "Toothbrush State",
+            )
+            self._finish_update()
+            return
         elif _sender.uuid == CHAR_DICT.get("BRUSHING_TIME")[0]:
+            value = int.from_bytes(data, "little")
             sensor_value = value
             sensor_id = CHAR_DICT.get("BRUSHING_TIME")[1]
             sensor_string = CHAR_DICT.get("BRUSHING_TIME")[2]
         elif _sender.uuid == CHAR_DICT.get("MODE")[0]:
+            value = int.from_bytes(data, "little")
             sensor_value = DEVICE_TYPES[self._model].modes.get(value, f"unknown mode")
             sensor_id = CHAR_DICT.get("MODE")[1]
             sensor_string = CHAR_DICT.get("MODE")[2]
         elif _sender.uuid == CHAR_DICT.get("STRENGTH")[0]:
+            value = int.from_bytes(data, "little")
             sensor_value = STRENGTH.get(value, f"unknown speed")
             sensor_id = CHAR_DICT.get("STRENGTH")[1]
             sensor_string = CHAR_DICT.get("STRENGTH")[2]
-        else:
-            return
 
         self.update_sensor(
             sensor_id,
@@ -390,3 +402,5 @@ class SonicareBluetoothDeviceData(BluetoothData):
             None,
             sensor_string
         )
+        self._finish_update()
+        return
