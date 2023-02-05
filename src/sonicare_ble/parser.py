@@ -135,7 +135,6 @@ class SonicareBluetoothDeviceData(BluetoothData):
         """Update from BLE advertisement data."""
         _LOGGER.debug("Parsing Sonicare BLE advertisement data: %s", service_info)
         manufacturer_data = service_info.manufacturer_data
-        service_info.from_advertisement()
         service_uuids = service_info.service_uuids
         address = service_info.address
 
@@ -333,7 +332,7 @@ class SonicareBluetoothDeviceData(BluetoothData):
         )
         return self._finish_update()
 
-    def _notification_handler(self, _sender: int, data: bytearray) -> None:
+    def _notification_handler(self, _sender: BleakGATTCharacteristic, data: bytearray) -> None:
         """Start notification"""
         value = int.from_bytes(data, "little")
         if _sender == CHARACTERISTIC_STATE:
@@ -345,7 +344,8 @@ class SonicareBluetoothDeviceData(BluetoothData):
             sensor = SonicareSensor.BRUSHING_TIME
         elif _sender == CHARACTERISTIC_MODE:
             sensor = SonicareSensor.MODE
-
+        else:
+            return
         self.update_sensor(
             str(sensor),
             None,
