@@ -7,7 +7,7 @@ import time
 from dataclasses import dataclass
 from enum import Enum, auto
 
-from bleak import BLEDevice
+from bleak import BLEDevice, BleakGATTCharacteristic
 from bleak_retry_connector import BleakClientWithServiceCache, establish_connection
 from bluetooth_data_tools import short_address
 from bluetooth_sensor_state_data import BluetoothData
@@ -335,14 +335,15 @@ class SonicareBluetoothDeviceData(BluetoothData):
     def _notification_handler(self, _sender: BleakGATTCharacteristic, data: bytearray) -> None:
         """Start notification"""
         value = int.from_bytes(data, "little")
-        if _sender == CHARACTERISTIC_STATE:
+        _LOGGER.error(f"notification handler executed for {_sender.uuid} with value of {value}")
+        if _sender.uuid == CHARACTERISTIC_STATE:
             sensor = SonicareSensor.TOOTHBRUSH_STATE
             if value == 2:
                 self._brushing = False
                 self._last_brush = time.monotonic()
-        elif _sender == CHARACTERISTIC_BRUSHING_TIME:
+        elif _sender.uuid == CHARACTERISTIC_BRUSHING_TIME:
             sensor = SonicareSensor.BRUSHING_TIME
-        elif _sender == CHARACTERISTIC_MODE:
+        elif _sender.uuid == CHARACTERISTIC_MODE:
             sensor = SonicareSensor.MODE
         else:
             return
@@ -352,4 +353,3 @@ class SonicareBluetoothDeviceData(BluetoothData):
             value,
             None
         )
-        _LOGGER.error(f"Subscribed to uuid: {_sender}, received value of {value}")
