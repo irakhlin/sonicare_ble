@@ -402,4 +402,4 @@ class SonicareBluetoothDeviceData(BluetoothData):
             sensor_string
         )
         return self._finish_update()
-    
+
