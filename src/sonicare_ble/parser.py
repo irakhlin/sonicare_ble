@@ -356,7 +356,7 @@ class SonicareBluetoothDeviceData(BluetoothData):
             )
         return self._finish_update()
 
-    def _notification_handler(self, _sender: BleakGATTCharacteristic, data: bytearray) -> None:
+    def _notification_handler(self, _sender: BleakGATTCharacteristic, data: bytearray) -> SensorUpdate:
         """Start notification"""
         _LOGGER.error(f"notification handler executed for {_sender.uuid} with value of {data}")
         if _sender.uuid == CHAR_DICT.get("STATE")[0]:
@@ -377,8 +377,7 @@ class SonicareBluetoothDeviceData(BluetoothData):
                 None,
                 "Toothbrush State",
             )
-            self._finish_update()
-            return
+            return self._finish_update()
         elif _sender.uuid == CHAR_DICT.get("BRUSHING_TIME")[0]:
             value = int.from_bytes(data, "little")
             sensor_value = value
@@ -402,5 +401,5 @@ class SonicareBluetoothDeviceData(BluetoothData):
             None,
             sensor_string
         )
-        self._finish_update()
-        return
+        return self._finish_update()
+    
